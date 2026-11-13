@@ -20,7 +20,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -55,13 +59,16 @@ fun  BluetoothEsp32Screen(
     modifier: Modifier = Modifier,
     bluetoothVM: BluetoothViewModel = viewModel(),
     preSelectedAddress: TextFieldValue = TextFieldValue("XX:XX:XX:XX:XX:XX")
-    ){
+){
     val context = LocalContext.current
     val connectionState by bluetoothVM.connectionState.collectAsState()
     val recivedDataLog by bluetoothVM.receivedDataLog.collectAsState()
 
+    // NUEVO: Observamos los estados de los sensores
+    val temperature by bluetoothVM.temperature.collectAsState()
+    val humidity by bluetoothVM.humidity.collectAsState()
+
     var deviceAddressInput by remember { mutableStateOf(preSelectedAddress) }
-    var messageToSendInput by remember { mutableStateOf(TextFieldValue("")) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -74,10 +81,10 @@ fun  BluetoothEsp32Screen(
             Manifest.permission.BLUETOOTH_CONNECT
         )
     }else{
-            arrayOf(
-                Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN
-            )
+        arrayOf(
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_ADMIN
+        )
     }
 
     val multiplePermissionsLauncher = rememberLauncherForActivityResult(
@@ -89,7 +96,7 @@ fun  BluetoothEsp32Screen(
         if (!allGranted) {
             scope.launch {
                 snackbarHostState.showSnackbar(
-                    message = "Ser requieren permisos de Bluetooth para usar esta función.",
+                    message = "Se requieren permisos de Bluetooth para usar esta función.",
                     duration = SnackbarDuration.Long
                 )
             }
@@ -99,14 +106,13 @@ fun  BluetoothEsp32Screen(
         }
     }
 
-    LaunchedEffect(key1 = Unit) { // Solicitar permisos al inicio si no los tiene
+    LaunchedEffect(key1 = Unit) {
         if(!hasPermissions){
             multiplePermissionsLauncher.launch(permissionsToRequest)
         }
     }
     // --- Fin Gestión de Permisos ---
 
-    // Scroll al final del log cuando llegan nuevos mensajes
     LaunchedEffect(recivedDataLog.size) {
         if(recivedDataLog.isNotEmpty()){
             listState.animateScrollToItem(recivedDataLog.size - 1  )
@@ -170,7 +176,7 @@ fun  BluetoothEsp32Screen(
                 Button(
                     onClick = { bluetoothVM.disconnect() },
                     enabled = connectionState is ConnectionState.Connecting ||
-                    connectionState is ConnectionState.Connected
+                            connectionState is ConnectionState.Connected
 
                 ) {
                     Text("Desconectar")
@@ -178,29 +184,87 @@ fun  BluetoothEsp32Screen(
             }
             when(val state = connectionState){
                 is ConnectionState.Idle -> Text("Estado: Inactivo")
-                is ConnectionState.Connecting ->Text("Estado> Conectado a ${state.deviceName}...")
-                is ConnectionState.Connected -> Text("Estado> Conectado a ${state.deviceName}", color = Color(0xFF006400))
+                is ConnectionState.Connecting ->Text("Estado: Conectando a ${state.deviceName}...")
+                is ConnectionState.Connected -> Text("Estado: Conectado a ${state.deviceName}", color = Color(0xFF006400))
                 is ConnectionState.Error -> Text("Estado: Error - ${state.message}", color = MaterialTheme.colorScheme.error)
                 is ConnectionState.Disconnected -> Text("Estado: Desconectado")
             }
 
-            OutlinedTextField(
-                value = messageToSendInput,
-                onValueChange = { messageToSendInput = it },
-                label = { Text("Mensaje a enviar") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = connectionState is ConnectionState.Connected
-            )
-            Button(
-                onClick = {
-                    bluetoothVM.sendMessage(messageToSendInput.text)
-                    messageToSendInput = TextFieldValue("")
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = connectionState is ConnectionState.Connected && messageToSendInput.text.isNotBlank()
+            val isConnected = connectionState is ConnectionState.Connected
+
+            // --- ACTIVIDAD 1: Tarjeta de envío de datos (LEDs) ---
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Text("Enviar")
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Actividad 1: Envío de Datos (LEDs)", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Controles LED 1
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Button(
+                            onClick = { bluetoothVM.setLed1(true) },
+                            enabled = isConnected,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                        ) { Text("Encender L1") }
+
+                        Button(
+                            onClick = { bluetoothVM.setLed1(false) },
+                            enabled = isConnected,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                        ) { Text("Apagar L1") }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Controles LED 2
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Button(
+                            onClick = { bluetoothVM.setLed2(true) },
+                            enabled = isConnected,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                        ) { Text("Encender L2") }
+
+                        Button(
+                            onClick = { bluetoothVM.setLed2(false) },
+                            enabled = isConnected,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                        ) { Text("Apagar L2") }
+                    }
+                }
             }
+
+            // --- ACTIVIDAD 2: Tarjeta de recepción de datos (DHT11) ---
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Actividad 2: Recepción de Datos (DHT11)", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("Temperatura: $temperature °C")
+                    LinearProgressIndicator(
+                        progress = { (temperature / 50f).coerceIn(0f, 1f) }, // Escala hasta 50°C
+                        modifier = Modifier.fillMaxWidth().height(12.dp),
+                        color = Color(0xFFFF9800) // Naranja
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("Humedad: $humidity %")
+                    LinearProgressIndicator(
+                        progress = { (humidity / 100f).coerceIn(0f, 1f) }, // Escala hasta 100%
+                        modifier = Modifier.fillMaxWidth().height(12.dp),
+                        color = Color(0xFF03A9F4) // Azul
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
             Text("Log de Comunicación:", style = MaterialTheme.typography.titleMedium)
             LazyColumn(
@@ -214,25 +278,17 @@ fun  BluetoothEsp32Screen(
                 items(recivedDataLog){ logEntry ->
                     Text(logEntry, style = MaterialTheme.typography.bodySmall)
                 }
-                if(recivedDataLog.isNotEmpty())
-                {
+                // Corregido: Mostrar texto cuando la lista ESTÁ vacía
+                if(recivedDataLog.isEmpty()) {
                     item { Text("No hay mensajes", style = MaterialTheme.typography.bodySmall) }
                 }
             }
-
         }
-
-
-
-
     }
-
-
 }
 
 fun hasRequiredBluetoothPermissions(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-
         ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
                 ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
     } else {

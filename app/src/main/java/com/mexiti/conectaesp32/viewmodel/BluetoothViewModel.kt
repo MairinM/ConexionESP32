@@ -16,51 +16,92 @@ import java.util.Locale
 
 class BluetoothViewModel(application: Application): AndroidViewModel(application){
     private val bluetoothRepository = BluetoothRepository(application.applicationContext)
+
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
-    val connectionState:StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
     private val _receivedDataLog = MutableStateFlow<List<String>>(emptyList())
     val receivedDataLog: StateFlow<List<String>> = _receivedDataLog.asStateFlow()
-    val adapterState:String
+
+    // NUEVO: Estados para la Actividad 2 (Lecturas del DHT11)
+    private val _temperature = MutableStateFlow(0f)
+    val temperature: StateFlow<Float> = _temperature.asStateFlow()
+
+    private val _humidity = MutableStateFlow(0f)
+    val humidity: StateFlow<Float> = _humidity.asStateFlow()
+
+    val adapterState: String
         get() = bluetoothRepository.getAdapterState()
+
     init {
         // Observar el estado de conexión del repositorio
         bluetoothRepository.connectionState
             .onEach { state -> _connectionState.value = state }
             .launchIn(viewModelScope)
+
         // Observar los datos recibidos del repositorio
         bluetoothRepository.receivedData
             .onEach { data ->
-                _receivedDataLog.value = _receivedDataLog.value + "${getCurrentTimestamp()} TX: $data"
+                // Corregí "TX" por "RX" para indicar que es recepción
+                _receivedDataLog.value = _receivedDataLog.value + "${getCurrentTimestamp()} RX: $data"
+
+                // NUEVO: Procesamiento de datos recibidos (Temperatura y Humedad)
+                try {
+                    val cleanData = data.trim()
+                    if (cleanData.contains(",")) {
+                        val parts = cleanData.split(",")
+                        if (parts.size >= 2) {
+                            val temp = parts[0].toFloatOrNull()
+                            val hum = parts[1].toFloatOrNull()
+
+                            if (temp != null) _temperature.value = temp
+                            if (hum != null) _humidity.value = hum
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("BluetoothViewModel", "Error al procesar sensor: ${e.message}")
+                }
             }
             .launchIn(viewModelScope)
     }
+
     fun connect(deviceAddress: String){
         if(deviceAddress.isBlank() || !deviceAddress.matches(Regex("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"))){
             _connectionState.value = ConnectionState.Error("Dirección MAC inválida")
             return
         }
-        _receivedDataLog.value = emptyList() // Limpiar log al intentar nueva conexión
-        bluetoothRepository.connectToDevice(deviceAddress,viewModelScope)
+        _receivedDataLog.value = emptyList()
+        bluetoothRepository.connectToDevice(deviceAddress, viewModelScope)
     }
+
     fun disconnect(){
         bluetoothRepository.disconnect(viewModelScope)
-        // El estado se actualizará a través del flow del repositorio
     }
+
+    // Método original para enviar mensajes crudos
     fun sendMessage(message: String){
         if(message.isBlank()) return
-        val fullMessage = message + "\n" // Es común añadir nueva línea
-        bluetoothRepository.sendData(fullMessage,viewModelScope)
-        _receivedDataLog.value = receivedDataLog.value + "${getCurrentTimestamp()} TX: $message"
+        val fullMessage = message + "\n"
+        bluetoothRepository.sendData(fullMessage, viewModelScope)
+        _receivedDataLog.value = _receivedDataLog.value + "${getCurrentTimestamp()} TX: $message"
     }
-    private fun getCurrentTimestamp():String {
-        // Implementa una función simple para obtener un timestamp si lo deseas
+
+    // NUEVO: Funciones de la Actividad 1 para control de LEDs
+    fun setLed1(isOn: Boolean) {
+        sendMessage(if (isOn) "1" else "0")
+    }
+
+    fun setLed2(isOn: Boolean) {
+        sendMessage(if (isOn) "3" else "2")
+    }
+
+    private fun getCurrentTimestamp(): String {
         return java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-     }
-    // Opcional: para limpiar recursos si es necesario, aunque el repositorio ya lo hace
+    }
+
     override fun onCleared() {
         super.onCleared()
         bluetoothRepository.disconnect(viewModelScope)
         Log.d("BluetoothViewModel", "ViewModel cleared")
     }
-
 }
